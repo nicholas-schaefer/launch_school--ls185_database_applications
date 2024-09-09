@@ -57,16 +57,13 @@ class ExpenseData
 
   def initialize
     @connection = PG.connect( dbname: 'expenses' )
+    setup_schema
   end
 
   def list_expenses
     result = @connection.exec "SELECT * FROM expenses ORDER BY created_on ASC";
-    expenses_count = result.ntuples
-
-    puts "There are #{expenses_count} expenses"
-    display_expenses(result)
-    puts "-----------------------------------------------"
-    puts ""
+    display_count(result)
+    display_expenses(result) if result.ntuples > 0
   end
 
   def add_expense(amount, memo)
@@ -99,16 +96,22 @@ class ExpenseData
   def search_expenses(query)
     sql = "SELECT * FROM expenses WHERE memo ~* $1"
     result = @connection.exec_params(sql, [query])
-    matching_rows_count = result.ntuples
-    if matching_rows_count.zero?
-      puts "0 Rows were found."
-      return
-    end
-
-    display_expenses(result)
+    display_count(result)
+    display_expenses(result) if result.ntuples > 0
   end
 
   private
+
+  def display_count(expenses)
+    count = expenses.ntuples
+    if count == 0
+      puts "There are no expenses."
+    elsif count == 1
+      puts "There is 1 expense."
+    else
+      puts "There are #{count} expenses."
+    end
+  end
 
   def display_expenses(expenses)
     expenses.each do |expense|
@@ -119,6 +122,30 @@ class ExpenseData
 
       puts columns.join(" | ")
     end
+    puts "-" * 50
+
+    amount_sum = expenses.field_values("amount").map(&:to_f).inject(:+)
+
+    puts "Total #{format('%.2f', amount_sum.to_s).rjust(25)}"
+  end
+
+  def setup_schema
+    result = @connection.exec <<~SQL
+      SELECT COUNT(*) FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'expenses';
+    SQL
+
+    if result[0]["count"] == "0"
+      @connection.exec <<~SQL
+        CREATE TABLE expenses (
+        id serial PRIMARY KEY,
+        amount numeric(6,2) NOT NULL,
+        memo varchar(100) NOT NULL,
+        created_on date NOT NULL
+        );
+      SQL
+    end
+
   end
 end
 
