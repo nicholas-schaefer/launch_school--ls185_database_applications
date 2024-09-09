@@ -1,0 +1,125 @@
+#! /usr/bin/env ruby
+require "pg"
+require "date"
+require "io/console"
+
+
+class CLI
+  def initialize
+    @application = ExpenseData.new
+  end
+
+  def run(arguments)
+    case arguments.first
+    when 'add'
+      amount = arguments[1]
+      memo = arguments[2]
+      abort "You must provide an amount and memo." unless amount && memo
+      @application.add_expense(amount, memo)
+    when 'clear'
+      puts "This will remove all expenses. Are you sure? (y/n)"
+      response = $stdin.getch
+      @application.delete_all_expenses if response == "y"
+    when 'list'
+      @application.list_expenses
+    when 'delete'
+      id = arguments[1]
+      abort "You must provide an ID" unless id
+      @application.delete_expense(id)
+    when 'search'
+      query = arguments[1]
+      abort "You must provide a query" unless query
+      @application.search_expenses(query)
+    else
+      display_help
+    end
+  end
+
+  def display_help
+    puts <<~HELP_MESSAGE
+
+    An expense recording system
+    Commands:
+
+    add AMOUNT MEMO - record a new expense
+    clear - delete all expenses
+    list - list all expenses
+    delete NUMBER - remove expense with id NUMBER
+    search QUERY - list expenses with a matching memo field
+    HELP_MESSAGE
+  end
+end
+
+
+
+
+class ExpenseData
+
+  def initialize
+    @connection = PG.connect( dbname: 'expenses' )
+  end
+
+  def list_expenses
+    result = @connection.exec "SELECT * FROM expenses ORDER BY created_on ASC";
+    expenses_count = result.ntuples
+
+    puts "There are #{expenses_count} expenses"
+    display_expenses(result)
+    puts "-----------------------------------------------"
+    puts ""
+  end
+
+  def add_expense(amount, memo)
+    date = Date.today
+    sql = "INSERT into expenses (amount, memo, created_on) VALUES ($1, $2, $3)"
+    @connection.exec_params(sql, [amount, memo, date])
+  end
+
+
+  def delete_expense(id)
+    sql = "SELECT * FROM expenses WHERE ID = $1"
+    result = @connection.exec_params(sql, [id])
+    row_found = result.ntuples == 1
+
+    if row_found
+      sql = "DELETE FROM expenses WHERE ID = $1"
+      @connection.exec_params(sql, [id])
+      puts "The following expense has been deleted:"
+      display_expenses(result)
+    else
+      puts "There is no expense with the id '#{id}'."
+    end
+  end
+
+  def delete_all_expenses
+    @connection.exec("DELETE FROM expenses")
+    puts "All expenses have been deleted"
+  end
+
+  def search_expenses(query)
+    sql = "SELECT * FROM expenses WHERE memo ~* $1"
+    result = @connection.exec_params(sql, [query])
+    matching_rows_count = result.ntuples
+    if matching_rows_count.zero?
+      puts "0 Rows were found."
+      return
+    end
+
+    display_expenses(result)
+  end
+
+  private
+
+  def display_expenses(expenses)
+    expenses.each do |expense|
+      columns = [ expense['id'].rjust(5),
+                  expense['created_on'],
+                  expense['amount'].rjust(10),
+                  expense['memo'] ]
+
+      puts columns.join(" | ")
+    end
+  end
+end
+
+CLI.new.run(ARGV)
